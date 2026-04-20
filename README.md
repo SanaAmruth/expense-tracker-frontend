@@ -15,6 +15,14 @@ Mobile-first expense tracker prototype built with Expo and React Native.
 1. `npm install`
 2. `npm run start`
 
+If you’re using the voice backend locally, set `EXPO_PUBLIC_VOICE_API_URL` (see `.env.example`).
+
+## Deploy (Netlify)
+
+This project reads `EXPO_PUBLIC_*` env vars via Expo’s `.env` loading during `expo export`.
+If you deploy with Netlify (Git-based deploys), `netlify.toml` generates `.env` from Netlify’s
+environment variables at build time and publishes `dist/`.
+
 ## OpenAI integration
 
 You do not need an API key to run the current prototype.

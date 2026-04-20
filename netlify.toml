@@ -1,0 +1,4 @@
+[build]
+command = "printf \"EXPO_PUBLIC_SUPABASE_URL=%s\\nEXPO_PUBLIC_SUPABASE_ANON_KEY=%s\\nEXPO_PUBLIC_VOICE_API_URL=%s\\n\" \"$EXPO_PUBLIC_SUPABASE_URL\" \"$EXPO_PUBLIC_SUPABASE_ANON_KEY\" \"$EXPO_PUBLIC_VOICE_API_URL\" > .env && npx expo export -p web"
+publish = "dist"
+

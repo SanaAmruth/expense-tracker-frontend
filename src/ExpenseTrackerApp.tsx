@@ -57,10 +57,11 @@ type VoiceState = "idle" | "recording" | "processing" | "done" | "error";
 const STORAGE_KEY = "expense_tracker_state_v1";
 
 // ─── Backend URL ─────────────────────────────────────────────────────────────
-// For local dev:
-const VOICE_API_URL = "http://localhost:8000/voice-expense";
-// For production, replace with your Railway URL:
-// const VOICE_API_URL = "https://YOUR_APP.up.railway.app/voice-expense";
+// For Netlify/production, set `EXPO_PUBLIC_VOICE_API_URL` (e.g. https://YOUR_APP.up.railway.app/voice-expense).
+// For local dev, it falls back to localhost.
+const VOICE_API_URL =
+  process.env.EXPO_PUBLIC_VOICE_API_URL ??
+  (__DEV__ ? "http://localhost:8000/voice-expense" : "");
 
 type AuthMode = "required" | "offline";
 
@@ -467,9 +468,15 @@ export function ExpenseTrackerApp() {
     }
   };
 
+<<<<<<< HEAD
   const stopRecordingAndProcessWeb = () => {
     const mediaRecorder = mediaRecorderRef.current;
     if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+=======
+	  const stopRecordingAndProcessWeb = () => {
+	    const mediaRecorder = mediaRecorderRef.current;
+	    if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+>>>>>>> 87aedcf (Initial frontend app)
 
     stopPulse();
     setVoiceState("processing");
@@ -485,6 +492,7 @@ export function ExpenseTrackerApp() {
       audioChunksRef.current = [];
 
       const formData = new FormData();
+<<<<<<< HEAD
       formData.append("audio", blob, "recording.webm");
 
       try {
@@ -493,6 +501,21 @@ export function ExpenseTrackerApp() {
       } catch (err: any) {
         setVoiceError(err?.message ?? "Something went wrong. Please try again.");
         setVoiceState("error");
+=======
+	      formData.append("audio", blob, "recording.webm");
+
+	      try {
+	        if (!VOICE_API_URL) {
+	          throw new Error(
+	            "Voice backend URL not configured. Set EXPO_PUBLIC_VOICE_API_URL (e.g. https://YOUR_APP.up.railway.app/voice-expense) and redeploy."
+	          );
+	        }
+	        const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
+	        await handleApiResponse(res);
+	      } catch (err: any) {
+	        setVoiceError(err?.message ?? "Something went wrong. Please try again.");
+	        setVoiceState("error");
+>>>>>>> 87aedcf (Initial frontend app)
       }
     };
 
@@ -523,9 +546,15 @@ export function ExpenseTrackerApp() {
     }
   };
 
+<<<<<<< HEAD
   const stopRecordingAndProcessNative = async () => {
     const recording = recordingRef.current;
     if (!recording) return;
+=======
+	  const stopRecordingAndProcessNative = async () => {
+	    const recording = recordingRef.current;
+	    if (!recording) return;
+>>>>>>> 87aedcf (Initial frontend app)
 
     stopPulse();
     setVoiceState("processing");
@@ -539,6 +568,7 @@ export function ExpenseTrackerApp() {
       if (!uri) throw new Error("Recording URI missing.");
 
       const formData = new FormData();
+<<<<<<< HEAD
       // @ts-ignore – React Native FormData accepts {uri, name, type}
       formData.append("audio", { uri, name: "recording.m4a", type: "audio/m4a" });
 
@@ -547,6 +577,21 @@ export function ExpenseTrackerApp() {
     } catch (err: any) {
       setVoiceError(err?.message ?? "Something went wrong. Please try again.");
       setVoiceState("error");
+=======
+	      // @ts-ignore – React Native FormData accepts {uri, name, type}
+	      formData.append("audio", { uri, name: "recording.m4a", type: "audio/m4a" });
+
+	      if (!VOICE_API_URL) {
+	        throw new Error(
+	          "Voice backend URL not configured. Set EXPO_PUBLIC_VOICE_API_URL (e.g. https://YOUR_APP.up.railway.app/voice-expense) and redeploy."
+	        );
+	      }
+	      const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
+	      await handleApiResponse(res);
+	    } catch (err: any) {
+	      setVoiceError(err?.message ?? "Something went wrong. Please try again.");
+	      setVoiceState("error");
+>>>>>>> 87aedcf (Initial frontend app)
       recordingRef.current = null;
     }
   };
