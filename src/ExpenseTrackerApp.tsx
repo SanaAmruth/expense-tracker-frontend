@@ -466,20 +466,14 @@ export function ExpenseTrackerApp() {
       setVoiceError(msg);
       setVoiceState("error");
     }
-  };
+	  };
 
-<<<<<<< HEAD
-  const stopRecordingAndProcessWeb = () => {
-    const mediaRecorder = mediaRecorderRef.current;
-    if (!mediaRecorder || mediaRecorder.state === "inactive") return;
-=======
 	  const stopRecordingAndProcessWeb = () => {
 	    const mediaRecorder = mediaRecorderRef.current;
 	    if (!mediaRecorder || mediaRecorder.state === "inactive") return;
->>>>>>> 87aedcf (Initial frontend app)
 
-    stopPulse();
-    setVoiceState("processing");
+	    stopPulse();
+	    setVoiceState("processing");
 
     mediaRecorder.onstop = async () => {
       // Stop all mic tracks to release the browser mic indicator
@@ -491,17 +485,7 @@ export function ExpenseTrackerApp() {
       const blob = new Blob(audioChunksRef.current, { type: mimeType });
       audioChunksRef.current = [];
 
-      const formData = new FormData();
-<<<<<<< HEAD
-      formData.append("audio", blob, "recording.webm");
-
-      try {
-        const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
-        await handleApiResponse(res);
-      } catch (err: any) {
-        setVoiceError(err?.message ?? "Something went wrong. Please try again.");
-        setVoiceState("error");
-=======
+	      const formData = new FormData();
 	      formData.append("audio", blob, "recording.webm");
 
 	      try {
@@ -515,12 +499,11 @@ export function ExpenseTrackerApp() {
 	      } catch (err: any) {
 	        setVoiceError(err?.message ?? "Something went wrong. Please try again.");
 	        setVoiceState("error");
->>>>>>> 87aedcf (Initial frontend app)
-      }
-    };
+	      }
+	    };
 
-    mediaRecorder.stop();
-  };
+	    mediaRecorder.stop();
+	  };
 
   // ─── NATIVE: expo-av ──────────────────────────────────────────────────────
   const startRecordingNative = async () => {
@@ -546,18 +529,12 @@ export function ExpenseTrackerApp() {
     }
   };
 
-<<<<<<< HEAD
-  const stopRecordingAndProcessNative = async () => {
-    const recording = recordingRef.current;
-    if (!recording) return;
-=======
 	  const stopRecordingAndProcessNative = async () => {
 	    const recording = recordingRef.current;
 	    if (!recording) return;
->>>>>>> 87aedcf (Initial frontend app)
 
-    stopPulse();
-    setVoiceState("processing");
+	    stopPulse();
+	    setVoiceState("processing");
 
     try {
       await recording.stopAndUnloadAsync();
@@ -567,17 +544,7 @@ export function ExpenseTrackerApp() {
 
       if (!uri) throw new Error("Recording URI missing.");
 
-      const formData = new FormData();
-<<<<<<< HEAD
-      // @ts-ignore – React Native FormData accepts {uri, name, type}
-      formData.append("audio", { uri, name: "recording.m4a", type: "audio/m4a" });
-
-      const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
-      await handleApiResponse(res);
-    } catch (err: any) {
-      setVoiceError(err?.message ?? "Something went wrong. Please try again.");
-      setVoiceState("error");
-=======
+	      const formData = new FormData();
 	      // @ts-ignore – React Native FormData accepts {uri, name, type}
 	      formData.append("audio", { uri, name: "recording.m4a", type: "audio/m4a" });
 
@@ -591,10 +558,9 @@ export function ExpenseTrackerApp() {
 	    } catch (err: any) {
 	      setVoiceError(err?.message ?? "Something went wrong. Please try again.");
 	      setVoiceState("error");
->>>>>>> 87aedcf (Initial frontend app)
-      recordingRef.current = null;
-    }
-  };
+	      recordingRef.current = null;
+	    }
+	  };
 
   // ─── Platform-aware wrappers ──────────────────────────────────────────────
   const isWeb = typeof navigator !== "undefined" && navigator.product !== "ReactNative";
