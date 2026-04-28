@@ -468,7 +468,7 @@ export function ExpenseTrackerApp() {
     }
 	  };
 
-	  const stopRecordingAndProcessWeb = () => {
+  const stopRecordingAndProcessWeb = () => {
 	    const mediaRecorder = mediaRecorderRef.current;
 	    if (!mediaRecorder || mediaRecorder.state === "inactive") return;
 
@@ -485,8 +485,15 @@ export function ExpenseTrackerApp() {
       const blob = new Blob(audioChunksRef.current, { type: mimeType });
       audioChunksRef.current = [];
 
-	      const formData = new FormData();
-	      formData.append("audio", blob, "recording.webm");
+      const formData = new FormData();
+      const ext =
+        mimeType.includes("mp4") ? "mp4" :
+        mimeType.includes("mpeg") ? "mp3" :
+        mimeType.includes("wav") ? "wav" :
+        mimeType.includes("webm") ? "webm" :
+        mimeType.includes("ogg") ? "ogg" :
+        "webm";
+      formData.append("audio", blob, `recording.${ext}`);
 
 	      try {
 	        if (!VOICE_API_URL) {
@@ -496,11 +503,21 @@ export function ExpenseTrackerApp() {
 	        }
 	        const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
 	        await handleApiResponse(res);
-	      } catch (err: any) {
-	        setVoiceError(err?.message ?? "Something went wrong. Please try again.");
-	        setVoiceState("error");
-	      }
-	    };
+      } catch (err: any) {
+        const rawMessage = String(err?.message ?? "");
+        const isNetworkError =
+          rawMessage.toLowerCase().includes("load failed") ||
+          rawMessage.toLowerCase().includes("failed to fetch") ||
+          rawMessage.toLowerCase().includes("network request failed");
+
+        setVoiceError(
+          isNetworkError
+            ? `Couldn’t reach the voice API. Check that EXPO_PUBLIC_VOICE_API_URL is set to your public AWS API Gateway endpoint (not localhost). Current: ${VOICE_API_URL || "(empty)"}.`
+            : rawMessage || "Something went wrong. Please try again."
+        );
+        setVoiceState("error");
+      }
+    };
 
 	    mediaRecorder.stop();
 	  };
@@ -529,7 +546,7 @@ export function ExpenseTrackerApp() {
     }
   };
 
-	  const stopRecordingAndProcessNative = async () => {
+  const stopRecordingAndProcessNative = async () => {
 	    const recording = recordingRef.current;
 	    if (!recording) return;
 
@@ -544,9 +561,9 @@ export function ExpenseTrackerApp() {
 
       if (!uri) throw new Error("Recording URI missing.");
 
-	      const formData = new FormData();
-	      // @ts-ignore – React Native FormData accepts {uri, name, type}
-	      formData.append("audio", { uri, name: "recording.m4a", type: "audio/m4a" });
+      const formData = new FormData();
+      // @ts-ignore – React Native FormData accepts {uri, name, type}
+      formData.append("audio", { uri, name: "recording.m4a", type: "audio/mp4" });
 
 	      if (!VOICE_API_URL) {
 	        throw new Error(
@@ -555,12 +572,22 @@ export function ExpenseTrackerApp() {
 	      }
 	      const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
 	      await handleApiResponse(res);
-	    } catch (err: any) {
-	      setVoiceError(err?.message ?? "Something went wrong. Please try again.");
-	      setVoiceState("error");
-	      recordingRef.current = null;
-	    }
-	  };
+    } catch (err: any) {
+      const rawMessage = String(err?.message ?? "");
+      const isNetworkError =
+        rawMessage.toLowerCase().includes("load failed") ||
+        rawMessage.toLowerCase().includes("failed to fetch") ||
+        rawMessage.toLowerCase().includes("network request failed");
+
+      setVoiceError(
+        isNetworkError
+          ? `Couldn’t reach the voice API. Check that EXPO_PUBLIC_VOICE_API_URL is set to your public AWS API Gateway endpoint (not localhost). Current: ${VOICE_API_URL || "(empty)"}.`
+          : rawMessage || "Something went wrong. Please try again."
+      );
+      setVoiceState("error");
+      recordingRef.current = null;
+    }
+  };
 
   // ─── Platform-aware wrappers ──────────────────────────────────────────────
   const isWeb = typeof navigator !== "undefined" && navigator.product !== "ReactNative";
