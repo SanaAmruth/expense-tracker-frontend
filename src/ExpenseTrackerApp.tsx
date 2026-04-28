@@ -56,6 +56,66 @@ type VoiceState = "idle" | "recording" | "processing" | "done" | "error";
 
 const STORAGE_KEY = "expense_tracker_state_v1";
 
+// ─── Web audio helpers (Safari mp4 → WAV) ────────────────────────────────────
+const encodeWav16Mono = (audioBuffer: AudioBuffer) => {
+  const channelData = audioBuffer.getChannelData(0);
+  const sampleRate = audioBuffer.sampleRate;
+  const numSamples = channelData.length;
+
+  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(buffer);
+
+  const writeString = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i));
+  };
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeString(8, "WAVE");
+
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+
+  writeString(36, "data");
+  view.setUint32(40, numSamples * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    const s = Math.max(-1, Math.min(1, channelData[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([view], { type: "audio/wav" });
+};
+
+const convertBlobToWavIfNeeded = async (blob: Blob, mimeType: string) => {
+  const looksLikeMp4 = mimeType.includes("mp4") || mimeType.includes("mpeg4") || mimeType.includes("video/");
+  if (!looksLikeMp4) return { blob, mimeType };
+
+  const AudioContextCtor =
+    (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextCtor) return { blob, mimeType };
+
+  const ctx = new AudioContextCtor();
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioBuffer: AudioBuffer = await new Promise((resolve, reject) => {
+      ctx.decodeAudioData(arrayBuffer, resolve, reject);
+    });
+    const wavBlob = encodeWav16Mono(audioBuffer);
+    return { blob: wavBlob, mimeType: "audio/wav" };
+  } finally {
+    ctx.close().catch(() => {});
+  }
+};
+
 // ─── Backend URL ─────────────────────────────────────────────────────────────
 // For Netlify/production, set `EXPO_PUBLIC_VOICE_API_URL` (e.g. https://YOUR_APP.up.railway.app/voice-expense).
 // For local dev, it falls back to localhost.
@@ -475,7 +535,7 @@ export function ExpenseTrackerApp() {
 	    stopPulse();
 	    setVoiceState("processing");
 
-    mediaRecorder.onstop = async () => {
+	    mediaRecorder.onstop = async () => {
       // Stop all mic tracks to release the browser mic indicator
       mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
@@ -485,15 +545,16 @@ export function ExpenseTrackerApp() {
       const blob = new Blob(audioChunksRef.current, { type: mimeType });
       audioChunksRef.current = [];
 
-      const formData = new FormData();
+	      const formData = new FormData();
+      const converted = await convertBlobToWavIfNeeded(blob, mimeType);
       const ext =
-        mimeType.includes("mp4") ? "mp4" :
-        mimeType.includes("mpeg") ? "mp3" :
-        mimeType.includes("wav") ? "wav" :
-        mimeType.includes("webm") ? "webm" :
-        mimeType.includes("ogg") ? "ogg" :
-        "webm";
-      formData.append("audio", blob, `recording.${ext}`);
+        converted.mimeType.includes("wav") ? "wav" :
+        converted.mimeType.includes("mp4") ? "mp4" :
+        converted.mimeType.includes("mpeg") ? "mp3" :
+        converted.mimeType.includes("webm") ? "webm" :
+        converted.mimeType.includes("ogg") ? "ogg" :
+        "dat";
+      formData.append("audio", converted.blob, `recording.${ext}`);
 
 	      try {
 	        if (!VOICE_API_URL) {
