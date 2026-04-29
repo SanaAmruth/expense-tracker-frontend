@@ -92,7 +92,8 @@ const encodeWav16Mono = (audioBuffer: AudioBuffer) => {
     offset += 2;
   }
 
-  return new Blob([view], { type: "audio/wav" });
+  // Use the underlying ArrayBuffer (not the DataView object) for a clean WAV file.
+  return new Blob([buffer], { type: "audio/wav" });
 };
 
 const convertBlobToWavIfNeeded = async (blob: Blob, mimeType: string) => {
