@@ -96,8 +96,8 @@ const encodeWav16Mono = (audioBuffer: AudioBuffer) => {
 };
 
 const convertBlobToWavIfNeeded = async (blob: Blob, mimeType: string) => {
-  const looksLikeMp4 = mimeType.includes("mp4") || mimeType.includes("mpeg4") || mimeType.includes("video/");
-  if (!looksLikeMp4) return { blob, mimeType };
+  // Prefer WAV upload because it's consistently accepted by transcription models.
+  // If decode fails, caller falls back to the original blob.
 
   const AudioContextCtor =
     (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -546,7 +546,13 @@ export function ExpenseTrackerApp() {
       audioChunksRef.current = [];
 
 	      const formData = new FormData();
-      const converted = await convertBlobToWavIfNeeded(blob, mimeType);
+      let converted = { blob, mimeType };
+      try {
+        // Safari sometimes reports an empty/incorrect mimeType; attempt WAV conversion anyway.
+        converted = await convertBlobToWavIfNeeded(blob, mimeType || "application/octet-stream");
+      } catch {
+        converted = { blob, mimeType };
+      }
       const ext =
         converted.mimeType.includes("wav") ? "wav" :
         converted.mimeType.includes("mp4") ? "mp4" :
