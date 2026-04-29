@@ -382,13 +382,15 @@ export function ExpenseTrackerApp() {
   // Native (expo-av) ref
   const recordingRef = useRef<Audio.Recording | null>(null);
 
-  // Web (WebAudio WAV recorder) refs
+  // Web recording refs (MediaRecorder preferred, WebAudio fallback)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const webAudioContextRef = useRef<AudioContext | null>(null);
   const webAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const webAudioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const webAudioGainRef = useRef<GainNode | null>(null);
   const webAudioSamplesRef = useRef<Float32Array[]>([]);
+  const mediaRecorderChunksRef = useRef<Blob[]>([]);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -508,47 +510,67 @@ export function ExpenseTrackerApp() {
     }
   };
 
-  // ─── WEB: WebAudio WAV recorder ───────────────────────────────────────────
+  const pickMediaRecorderMimeType = () => {
+    if (typeof MediaRecorder === "undefined") return "";
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+      "audio/ogg"
+    ];
+    for (const mime of candidates) {
+      // @ts-ignore - older libdom types may not include isTypeSupported
+      if (typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(mime)) {
+        return mime;
+      }
+    }
+    return "";
+  };
+
+  // ─── WEB: Start recording (MediaRecorder preferred) ───────────────────────
   const startRecordingWeb = async () => {
     try {
       setVoiceError("");
       setVoiceTranscript("");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
-      webAudioSamplesRef.current = [];
 
-      const AudioContextCtor =
-        (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextCtor) {
-        throw new Error("AudioContext not supported in this browser.");
-      }
-
-      const ctx: AudioContext = new AudioContextCtor();
-      webAudioContextRef.current = ctx;
-
-      const source = ctx.createMediaStreamSource(stream);
-      webAudioSourceRef.current = source;
-
-      // ScriptProcessorNode is deprecated but still widely supported; good enough for this app.
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
-      webAudioProcessorRef.current = processor;
-
-      // Prevent echo/feedback while still allowing the processor to run.
-      const gain = ctx.createGain();
-      gain.gain.value = 0;
-      webAudioGainRef.current = gain;
-
-      processor.onaudioprocess = (e) => {
-        const input = e.inputBuffer.getChannelData(0);
-        webAudioSamplesRef.current.push(new Float32Array(input));
-      };
-
-      source.connect(processor);
-      processor.connect(gain);
-      gain.connect(ctx.destination);
-
-      if (ctx.state === "suspended") {
-        await ctx.resume().catch(() => {});
+      const mimeType = pickMediaRecorderMimeType();
+      if (mimeType) {
+        mediaRecorderChunksRef.current = [];
+        const recorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorderRef.current = recorder;
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) mediaRecorderChunksRef.current.push(e.data);
+        };
+        recorder.start();
+      } else {
+        // Fallback: WebAudio → WAV
+        webAudioSamplesRef.current = [];
+        const AudioContextCtor =
+          (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextCtor) {
+          throw new Error("Audio recording not supported in this browser.");
+        }
+        const ctx: AudioContext = new AudioContextCtor();
+        webAudioContextRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+        webAudioSourceRef.current = source;
+        const processor = ctx.createScriptProcessor(4096, 1, 1);
+        webAudioProcessorRef.current = processor;
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        webAudioGainRef.current = gain;
+        processor.onaudioprocess = (e) => {
+          const input = e.inputBuffer.getChannelData(0);
+          webAudioSamplesRef.current.push(new Float32Array(input));
+        };
+        source.connect(processor);
+        processor.connect(gain);
+        gain.connect(ctx.destination);
+        if (ctx.state === "suspended") {
+          await ctx.resume().catch(() => {});
+        }
       }
 
       setVoiceState("recording");
@@ -568,12 +590,19 @@ export function ExpenseTrackerApp() {
     stopPulse();
     setVoiceState("processing");
 
+    const recorder = mediaRecorderRef.current;
     const ctx = webAudioContextRef.current;
     const source = webAudioSourceRef.current;
     const processor = webAudioProcessorRef.current;
     const gain = webAudioGainRef.current;
 
     try {
+      if (recorder && recorder.state !== "inactive") {
+        await new Promise<void>((resolve) => {
+          recorder.onstop = () => resolve();
+          recorder.stop();
+        });
+      }
       processor?.disconnect();
       source?.disconnect();
       gain?.disconnect();
@@ -585,31 +614,50 @@ export function ExpenseTrackerApp() {
     mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
     mediaStreamRef.current = null;
 
-    const chunks = webAudioSamplesRef.current;
-    webAudioSamplesRef.current = [];
+    let wavBlob: Blob | null = null;
+    let filename = "recording.wav";
 
-    webAudioProcessorRef.current = null;
-    webAudioSourceRef.current = null;
-    webAudioGainRef.current = null;
+    if (recorder) {
+      const chunks = mediaRecorderChunksRef.current;
+      mediaRecorderChunksRef.current = [];
+      mediaRecorderRef.current = null;
+      const mimeType = chunks[0]?.type || recorder.mimeType || "application/octet-stream";
+      const blob = new Blob(chunks, { type: mimeType });
+      const ext = mimeType.includes("ogg") ? "ogg" : "webm";
+      filename = `recording.${ext}`;
+      wavBlob = blob;
+    } else {
+      const chunks = webAudioSamplesRef.current;
+      webAudioSamplesRef.current = [];
 
-    try {
-      if (!ctx) throw new Error("AudioContext missing.");
-      const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-      if (totalLength < 2000) throw new Error("Audio too short — please record a longer clip.");
+      webAudioProcessorRef.current = null;
+      webAudioSourceRef.current = null;
+      webAudioGainRef.current = null;
 
-      const merged = new Float32Array(totalLength);
-      let offset = 0;
-      for (const c of chunks) {
-        merged.set(c, offset);
-        offset += c.length;
+      try {
+        if (!ctx) throw new Error("AudioContext missing.");
+        const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+        if (totalLength < 2000) throw new Error("Audio too short — please record a longer clip.");
+
+        const merged = new Float32Array(totalLength);
+        let offset = 0;
+        for (const c of chunks) {
+          merged.set(c, offset);
+          offset += c.length;
+        }
+
+        const audioBuffer = ctx.createBuffer(1, merged.length, ctx.sampleRate);
+        audioBuffer.copyToChannel(merged, 0);
+        wavBlob = encodeWav16Mono(audioBuffer);
+      } finally {
+        webAudioContextRef.current = null;
+        await ctx?.close().catch(() => {});
       }
-
-      const audioBuffer = ctx.createBuffer(1, merged.length, ctx.sampleRate);
-      audioBuffer.copyToChannel(merged, 0);
-      const wavBlob = encodeWav16Mono(audioBuffer);
+    }
 
       const formData = new FormData();
-      formData.append("audio", wavBlob, "recording.wav");
+      if (!wavBlob) throw new Error("No audio recorded.");
+      formData.append("audio", wavBlob, filename);
 
       if (!VOICE_API_URL) {
         throw new Error(
@@ -632,8 +680,7 @@ export function ExpenseTrackerApp() {
       );
       setVoiceState("error");
     } finally {
-      webAudioContextRef.current = null;
-      await ctx?.close().catch(() => {});
+      // handled above per-path
     }
   };
 
