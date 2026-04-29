@@ -57,10 +57,41 @@ type VoiceState = "idle" | "recording" | "processing" | "done" | "error";
 const STORAGE_KEY = "expense_tracker_state_v1";
 
 // ─── Web audio helpers (Safari mp4 → WAV) ────────────────────────────────────
-const encodeWav16Mono = (audioBuffer: AudioBuffer) => {
+// Resample audio to 16kHz (Whisper's expected sample rate)
+const resampleTo16kHz = (audioBuffer: AudioBuffer): Float32Array => {
+  const sourceSampleRate = audioBuffer.sampleRate;
+  if (sourceSampleRate === 16000) {
+    return audioBuffer.getChannelData(0);
+  }
+
   const channelData = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
-  const numSamples = channelData.length;
+  const ratio = sourceSampleRate / 16000;
+  const newLength = Math.round(channelData.length / ratio);
+  const resampled = new Float32Array(newLength);
+
+  let pointerPosition = 0;
+  let i = 0;
+  while (i < newLength) {
+    const positionInOriginal = pointerPosition;
+    const left = Math.floor(positionInOriginal);
+    const right = Math.ceil(positionInOriginal);
+    const fraction = positionInOriginal - left;
+
+    const sample =
+      channelData[left] * (1 - fraction) + (channelData[right] || 0) * fraction;
+    resampled[i] = sample;
+
+    pointerPosition += ratio;
+    i++;
+  }
+  return resampled;
+};
+
+const encodeWav16Mono = (audioBuffer: AudioBuffer) => {
+  // Resample to 16kHz for Whisper compatibility
+  const resampled = resampleTo16kHz(audioBuffer);
+  const sampleRate = 16000;
+  const numSamples = resampled.length;
 
   const bytesPerSample = 2;
   const headerSize = 44;
@@ -81,8 +112,8 @@ const encodeWav16Mono = (audioBuffer: AudioBuffer) => {
   writeString(12, "fmt ");
   view.setUint32(16, 16, true); // PCM fmt chunk size
   view.setUint16(20, 1, true); // audio format PCM
-  view.setUint16(22, 1, true); // channels
-  view.setUint32(24, sampleRate, true);
+  view.setUint16(22, 1, true); // channels (mono)
+  view.setUint32(24, sampleRate, true); // sample rate 16kHz
   view.setUint32(28, sampleRate * bytesPerSample, true); // byte rate
   view.setUint16(32, bytesPerSample, true); // block align
   view.setUint16(34, 16, true); // bits per sample
@@ -92,7 +123,7 @@ const encodeWav16Mono = (audioBuffer: AudioBuffer) => {
 
   let offset = headerSize;
   for (let i = 0; i < numSamples; i++) {
-    const s = Math.max(-1, Math.min(1, channelData[i]));
+    const s = Math.max(-1, Math.min(1, resampled[i]));
     view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     offset += 2;
   }
