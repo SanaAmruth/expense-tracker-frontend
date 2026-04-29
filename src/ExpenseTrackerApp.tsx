@@ -377,10 +377,13 @@ export function ExpenseTrackerApp() {
   // Native (expo-av) ref
   const recordingRef = useRef<Audio.Recording | null>(null);
 
-  // Web (MediaRecorder) refs
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  // Web (WebAudio WAV recorder) refs
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const webAudioContextRef = useRef<AudioContext | null>(null);
+  const webAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const webAudioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const webAudioGainRef = useRef<GainNode | null>(null);
+  const webAudioSamplesRef = useRef<Float32Array[]>([]);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -500,23 +503,49 @@ export function ExpenseTrackerApp() {
     }
   };
 
-  // ─── WEB: MediaRecorder ───────────────────────────────────────────────────
+  // ─── WEB: WebAudio WAV recorder ───────────────────────────────────────────
   const startRecordingWeb = async () => {
     try {
       setVoiceError("");
       setVoiceTranscript("");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
-      audioChunksRef.current = [];
+      webAudioSamplesRef.current = [];
 
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
+      const AudioContextCtor =
+        (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) {
+        throw new Error("AudioContext not supported in this browser.");
+      }
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      const ctx: AudioContext = new AudioContextCtor();
+      webAudioContextRef.current = ctx;
+
+      const source = ctx.createMediaStreamSource(stream);
+      webAudioSourceRef.current = source;
+
+      // ScriptProcessorNode is deprecated but still widely supported; good enough for this app.
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      webAudioProcessorRef.current = processor;
+
+      // Prevent echo/feedback while still allowing the processor to run.
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      webAudioGainRef.current = gain;
+
+      processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        webAudioSamplesRef.current.push(new Float32Array(input));
       };
 
-      mediaRecorder.start();
+      source.connect(processor);
+      processor.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (ctx.state === "suspended") {
+        await ctx.resume().catch(() => {});
+      }
+
       setVoiceState("recording");
       startPulse();
     } catch (err: any) {
@@ -528,66 +557,80 @@ export function ExpenseTrackerApp() {
     }
 	  };
 
-  const stopRecordingAndProcessWeb = () => {
-	    const mediaRecorder = mediaRecorderRef.current;
-	    if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+  const stopRecordingAndProcessWeb = async () => {
+    if (voiceState !== "recording") return;
 
-	    stopPulse();
-	    setVoiceState("processing");
+    stopPulse();
+    setVoiceState("processing");
 
-	    mediaRecorder.onstop = async () => {
-      // Stop all mic tracks to release the browser mic indicator
-      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
-      mediaStreamRef.current = null;
-      mediaRecorderRef.current = null;
+    const ctx = webAudioContextRef.current;
+    const source = webAudioSourceRef.current;
+    const processor = webAudioProcessorRef.current;
+    const gain = webAudioGainRef.current;
 
-      const mimeType = audioChunksRef.current[0]?.type || "audio/webm";
-      const blob = new Blob(audioChunksRef.current, { type: mimeType });
-      audioChunksRef.current = [];
+    try {
+      processor?.disconnect();
+      source?.disconnect();
+      gain?.disconnect();
+    } catch {
+      // ignore disconnect issues
+    }
 
-	      const formData = new FormData();
-      let converted = { blob, mimeType };
-      try {
-        // Safari sometimes reports an empty/incorrect mimeType; attempt WAV conversion anyway.
-        converted = await convertBlobToWavIfNeeded(blob, mimeType || "application/octet-stream");
-      } catch {
-        converted = { blob, mimeType };
+    // Stop all mic tracks to release the browser mic indicator
+    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    mediaStreamRef.current = null;
+
+    const chunks = webAudioSamplesRef.current;
+    webAudioSamplesRef.current = [];
+
+    webAudioProcessorRef.current = null;
+    webAudioSourceRef.current = null;
+    webAudioGainRef.current = null;
+
+    try {
+      if (!ctx) throw new Error("AudioContext missing.");
+      const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+      if (totalLength < 2000) throw new Error("Audio too short — please record a longer clip.");
+
+      const merged = new Float32Array(totalLength);
+      let offset = 0;
+      for (const c of chunks) {
+        merged.set(c, offset);
+        offset += c.length;
       }
-      const ext =
-        converted.mimeType.includes("wav") ? "wav" :
-        converted.mimeType.includes("mp4") ? "mp4" :
-        converted.mimeType.includes("mpeg") ? "mp3" :
-        converted.mimeType.includes("webm") ? "webm" :
-        converted.mimeType.includes("ogg") ? "ogg" :
-        "dat";
-      formData.append("audio", converted.blob, `recording.${ext}`);
 
-	      try {
-	        if (!VOICE_API_URL) {
-	          throw new Error(
-	            "Voice backend URL not configured. Set EXPO_PUBLIC_VOICE_API_URL (e.g. https://YOUR_APP.up.railway.app/voice-expense) and redeploy."
-	          );
-	        }
-	        const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
-	        await handleApiResponse(res);
-      } catch (err: any) {
-        const rawMessage = String(err?.message ?? "");
-        const isNetworkError =
-          rawMessage.toLowerCase().includes("load failed") ||
-          rawMessage.toLowerCase().includes("failed to fetch") ||
-          rawMessage.toLowerCase().includes("network request failed");
+      const audioBuffer = ctx.createBuffer(1, merged.length, ctx.sampleRate);
+      audioBuffer.copyToChannel(merged, 0);
+      const wavBlob = encodeWav16Mono(audioBuffer);
 
-        setVoiceError(
-          isNetworkError
-            ? `Couldn’t reach the voice API. Check that EXPO_PUBLIC_VOICE_API_URL is set to your public AWS API Gateway endpoint (not localhost). Current: ${VOICE_API_URL || "(empty)"}.`
-            : rawMessage || "Something went wrong. Please try again."
+      const formData = new FormData();
+      formData.append("audio", wavBlob, "recording.wav");
+
+      if (!VOICE_API_URL) {
+        throw new Error(
+          "Voice backend URL not configured. Set EXPO_PUBLIC_VOICE_API_URL and redeploy."
         );
-        setVoiceState("error");
       }
-    };
+      const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
+      await handleApiResponse(res);
+    } catch (err: any) {
+      const rawMessage = String(err?.message ?? "");
+      const isNetworkError =
+        rawMessage.toLowerCase().includes("load failed") ||
+        rawMessage.toLowerCase().includes("failed to fetch") ||
+        rawMessage.toLowerCase().includes("network request failed");
 
-	    mediaRecorder.stop();
-	  };
+      setVoiceError(
+        isNetworkError
+          ? `Couldn’t reach the voice API. Check that EXPO_PUBLIC_VOICE_API_URL is set to your public AWS API Gateway endpoint (not localhost). Current: ${VOICE_API_URL || "(empty)"}.`
+          : rawMessage || "Something went wrong. Please try again."
+      );
+      setVoiceState("error");
+    } finally {
+      webAudioContextRef.current = null;
+      await ctx?.close().catch(() => {});
+    }
+  };
 
   // ─── NATIVE: expo-av ──────────────────────────────────────────────────────
   const startRecordingNative = async () => {
