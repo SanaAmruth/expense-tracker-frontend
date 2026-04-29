@@ -70,19 +70,18 @@ const resampleTo16kHz = (audioBuffer: AudioBuffer): Float32Array => {
   const resampled = new Float32Array(newLength);
 
   let pointerPosition = 0;
-  let i = 0;
-  while (i < newLength) {
+  for (let i = 0; i < newLength; i++) {
     const positionInOriginal = pointerPosition;
     const left = Math.floor(positionInOriginal);
-    const right = Math.ceil(positionInOriginal);
+    const right = Math.min(Math.ceil(positionInOriginal), channelData.length - 1);
     const fraction = positionInOriginal - left;
 
-    const sample =
-      channelData[left] * (1 - fraction) + (channelData[right] || 0) * fraction;
+    const leftValue = channelData[left] || 0;
+    const rightValue = channelData[right] || 0;
+    const sample = leftValue * (1 - fraction) + rightValue * fraction;
     resampled[i] = sample;
 
     pointerPosition += ratio;
-    i++;
   }
   return resampled;
 };
