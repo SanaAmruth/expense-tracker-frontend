@@ -659,7 +659,13 @@ export function ExpenseTrackerApp() {
 
 	      const formData = new FormData();
 	      if (!wavBlob) throw new Error("No audio recorded.");
-	      formData.append("audio", wavBlob, filename);
+	      
+	      // Convert to WAV if needed (webm/ogg not reliably supported by OpenAI)
+	      const mimeType = wavBlob.type || "application/octet-stream";
+	      const { blob: audioBlob, mimeType: finalMimeType } = await convertBlobToWavIfNeeded(wavBlob, mimeType);
+	      const finalFilename = finalMimeType === "audio/wav" ? "recording.wav" : filename;
+	      
+	      formData.append("audio", audioBlob, finalFilename);
 
 	      if (!VOICE_API_URL) {
 	        throw new Error(
