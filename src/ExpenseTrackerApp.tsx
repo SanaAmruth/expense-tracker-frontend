@@ -591,98 +591,100 @@ export function ExpenseTrackerApp() {
     setVoiceState("processing");
 
     const recorder = mediaRecorderRef.current;
-    const ctx = webAudioContextRef.current;
-    const source = webAudioSourceRef.current;
-    const processor = webAudioProcessorRef.current;
-    const gain = webAudioGainRef.current;
+	    const ctx = webAudioContextRef.current;
+	    const source = webAudioSourceRef.current;
+	    const processor = webAudioProcessorRef.current;
+	    const gain = webAudioGainRef.current;
 
-    try {
-      if (recorder && recorder.state !== "inactive") {
-        await new Promise<void>((resolve) => {
-          recorder.onstop = () => resolve();
-          recorder.stop();
-        });
-      }
-      processor?.disconnect();
-      source?.disconnect();
-      gain?.disconnect();
-    } catch {
-      // ignore disconnect issues
-    }
+	    try {
+	      if (recorder && recorder.state !== "inactive") {
+	        await new Promise<void>((resolve) => {
+	          recorder.onstop = () => resolve();
+	          recorder.stop();
+	        });
+	      }
 
-    // Stop all mic tracks to release the browser mic indicator
-    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
-    mediaStreamRef.current = null;
+	      try {
+	        processor?.disconnect();
+	        source?.disconnect();
+	        gain?.disconnect();
+	      } catch {
+	        // ignore disconnect issues
+	      }
 
-    let wavBlob: Blob | null = null;
-    let filename = "recording.wav";
+	      // Stop all mic tracks to release the browser mic indicator
+	      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+	      mediaStreamRef.current = null;
 
-    if (recorder) {
-      const chunks = mediaRecorderChunksRef.current;
-      mediaRecorderChunksRef.current = [];
-      mediaRecorderRef.current = null;
-      const mimeType = chunks[0]?.type || recorder.mimeType || "application/octet-stream";
-      const blob = new Blob(chunks, { type: mimeType });
-      const ext = mimeType.includes("ogg") ? "ogg" : "webm";
-      filename = `recording.${ext}`;
-      wavBlob = blob;
-    } else {
-      const chunks = webAudioSamplesRef.current;
-      webAudioSamplesRef.current = [];
+	      let wavBlob: Blob | null = null;
+	      let filename = "recording.wav";
 
-      webAudioProcessorRef.current = null;
-      webAudioSourceRef.current = null;
-      webAudioGainRef.current = null;
+	      if (recorder) {
+	        const chunks = mediaRecorderChunksRef.current;
+	        mediaRecorderChunksRef.current = [];
+	        mediaRecorderRef.current = null;
+	        const mimeType = chunks[0]?.type || recorder.mimeType || "application/octet-stream";
+	        const blob = new Blob(chunks, { type: mimeType });
+	        const ext = mimeType.includes("ogg") ? "ogg" : "webm";
+	        filename = `recording.${ext}`;
+	        wavBlob = blob;
+	      } else {
+	        const chunks = webAudioSamplesRef.current;
+	        webAudioSamplesRef.current = [];
 
-      try {
-        if (!ctx) throw new Error("AudioContext missing.");
-        const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-        if (totalLength < 2000) throw new Error("Audio too short — please record a longer clip.");
+	        webAudioProcessorRef.current = null;
+	        webAudioSourceRef.current = null;
+	        webAudioGainRef.current = null;
 
-        const merged = new Float32Array(totalLength);
-        let offset = 0;
-        for (const c of chunks) {
-          merged.set(c, offset);
-          offset += c.length;
-        }
+	        try {
+	          if (!ctx) throw new Error("AudioContext missing.");
+	          const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+	          if (totalLength < 2000) throw new Error("Audio too short — please record a longer clip.");
 
-        const audioBuffer = ctx.createBuffer(1, merged.length, ctx.sampleRate);
-        audioBuffer.copyToChannel(merged, 0);
-        wavBlob = encodeWav16Mono(audioBuffer);
-      } finally {
-        webAudioContextRef.current = null;
-        await ctx?.close().catch(() => {});
-      }
-    }
+	          const merged = new Float32Array(totalLength);
+	          let offset = 0;
+	          for (const c of chunks) {
+	            merged.set(c, offset);
+	            offset += c.length;
+	          }
 
-      const formData = new FormData();
-      if (!wavBlob) throw new Error("No audio recorded.");
-      formData.append("audio", wavBlob, filename);
+	          const audioBuffer = ctx.createBuffer(1, merged.length, ctx.sampleRate);
+	          audioBuffer.copyToChannel(merged, 0);
+	          wavBlob = encodeWav16Mono(audioBuffer);
+	        } finally {
+	          webAudioContextRef.current = null;
+	          await ctx?.close().catch(() => {});
+	        }
+	      }
 
-      if (!VOICE_API_URL) {
-        throw new Error(
-          "Voice backend URL not configured. Set EXPO_PUBLIC_VOICE_API_URL and redeploy."
-        );
-      }
-      const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
-      await handleApiResponse(res);
-    } catch (err: any) {
-      const rawMessage = String(err?.message ?? "");
-      const isNetworkError =
-        rawMessage.toLowerCase().includes("load failed") ||
-        rawMessage.toLowerCase().includes("failed to fetch") ||
-        rawMessage.toLowerCase().includes("network request failed");
+	      const formData = new FormData();
+	      if (!wavBlob) throw new Error("No audio recorded.");
+	      formData.append("audio", wavBlob, filename);
 
-      setVoiceError(
-        isNetworkError
-          ? `Couldn’t reach the voice API. Check that EXPO_PUBLIC_VOICE_API_URL is set to your public AWS API Gateway endpoint (not localhost). Current: ${VOICE_API_URL || "(empty)"}.`
-          : rawMessage || "Something went wrong. Please try again."
-      );
-      setVoiceState("error");
-    } finally {
-      // handled above per-path
-    }
-  };
+	      if (!VOICE_API_URL) {
+	        throw new Error(
+	          "Voice backend URL not configured. Set EXPO_PUBLIC_VOICE_API_URL and redeploy."
+	        );
+	      }
+	      const res = await fetch(VOICE_API_URL, { method: "POST", body: formData });
+	      await handleApiResponse(res);
+	    } catch (err: any) {
+	      const rawMessage = String(err?.message ?? "");
+	      const isNetworkError =
+	        rawMessage.toLowerCase().includes("load failed") ||
+	        rawMessage.toLowerCase().includes("failed to fetch") ||
+	        rawMessage.toLowerCase().includes("network request failed");
+
+		      setVoiceError(
+		        isNetworkError
+		          ? `Couldn’t reach the voice API. Check that EXPO_PUBLIC_VOICE_API_URL is set to your public AWS API Gateway endpoint (not localhost). Current: ${VOICE_API_URL || "(empty)"}.`
+		          : rawMessage || "Something went wrong. Please try again."
+		      );
+	      setVoiceState("error");
+	    } finally {
+	      // handled above per-path
+	    }
+	  };
 
   // ─── NATIVE: expo-av ──────────────────────────────────────────────────────
   const startRecordingNative = async () => {
